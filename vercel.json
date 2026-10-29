@@ -1,0 +1,6 @@
+{
+  "buildCommand": null,
+  "outputDirectory": "public",
+  "functions": { "api/*.js": { "maxDuration": 60 } },
+  "headers": [ { "source": "/(.*)", "headers": [ { "key": "X-Robots-Tag", "value": "noindex" } ] } ]
+}

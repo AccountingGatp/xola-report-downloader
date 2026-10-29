@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Xola Report Downloader</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<style>
+:root{--bg:#F2F5F5;--surface:#fff;--ink:#14212A;--muted:#5B6B75;--line:#DDE4E7;--accent:#1D4ED8;--accent-ink:#fff;--ok:#1B7F4B;--bad:#B42318;--warn:#B86E00;--radius:10px}
+@media (prefers-color-scheme:dark){:root{--bg:#0E151A;--surface:#161F26;--ink:#E5ECEF;--muted:#94A4AE;--line:#263540;--accent:#7FA2FF;--accent-ink:#0B1220;--ok:#4CC38A;--bad:#FF7A6E;--warn:#F0A83A}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{background:var(--surface);border-bottom:1px solid var(--line);padding:12px 16px}
+header h1{margin:0;font-size:18px}
+header span{color:var(--muted);font-size:12px}
+main{max-width:980px;margin:0 auto;padding:16px;display:grid;gap:16px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:16px}
+.card h2{margin:0 0 4px;font-size:15px}
+.card .sub{color:var(--muted);font-size:12px;margin-bottom:10px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+label.l{display:block;font-size:12px;font-weight:600;color:var(--muted);margin-bottom:4px}
+select,input[type=text],input[type=date],input[type=password]{width:100%;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink);font:inherit}
+.hint{font-size:12px;color:var(--muted);margin-top:4px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+button{font:inherit;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:8px;padding:7px 12px;cursor:pointer}
+button:hover{border-color:var(--accent)}
+button.primary{background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-weight:600;padding:10px 18px}
+button:disabled{opacity:.5;cursor:not-allowed}
+.seg{display:flex;gap:16px;flex-wrap:wrap}
+.seg label{display:flex;gap:6px;align-items:center;font-weight:500;color:var(--ink);font-size:13px}
+.accts{display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:4px 12px;max-height:260px;overflow:auto;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+.accts label{display:flex;gap:8px;align-items:center;font-size:13px;padding:3px 0;cursor:pointer}
+table{width:100%;border-collapse:collapse}
+th,td{text-align:left;padding:7px 8px;border-bottom:1px solid var(--line);font-size:13px}
+th{color:var(--muted);font-size:12px}
+td.num{font-variant-numeric:tabular-nums;text-align:right}
+.bar{height:8px;background:var(--line);border-radius:99px;overflow:hidden;min-width:90px}
+.bar i{display:block;height:100%;background:var(--accent);width:0;transition:width .2s}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}
+.msg{padding:10px 12px;border-radius:8px;border:1px solid var(--line);font-size:13px}
+.msg.bad{border-color:var(--bad)}.msg.warnb{border-color:var(--warn)}
+.hidden{display:none}
+</style>
+</head>
+<body>
+<header><h1>Xola Report Downloader</h1><span>Tick the accounts, choose the report, pick the dates, download.</span></header>
+<main>
+
+<section class="card hidden" id="login">
+  <h2>Team password</h2>
+  <div class="row"><input id="pw" type="password" placeholder="Enter the team password" style="max-width:320px"><button class="primary" id="pwGo">Open</button></div>
+  <div class="hint">Asked once per browser.</div>
+  <div class="msg bad hidden" id="pwErr" style="margin-top:10px"></div>
+</section>
+
+<div id="app" class="hidden" style="display:grid;gap:16px">
+  <section class="card">
+    <h2>1. Accounts</h2>
+    <div class="sub">Tick one or more. Each ticked account gets its own file.</div>
+    <div class="row" style="margin-bottom:8px"><button id="selAll">Select all</button><button id="selNone">Clear</button><span class="hint" id="selCount"></span></div>
+    <div class="accts" id="accts"></div>
+  </section>
+
+  <section class="card">
+    <h2>2. Report</h2>
+    <div class="grid">
+      <div><label class="l" for="rep">Report</label><select id="rep"></select><div class="hint" id="repHint"></div></div>
+      <div id="rawBox" class="hidden"><label class="l">For several accounts</label><div class="seg"><label><input type="radio" name="mode" value="combined" checked> One combined file</label><label><input type="radio" name="mode" value="separate"> One file per account (ZIP)</label></div>
+        <label class="l" style="margin-top:8px">File format</label><div class="seg"><label><input type="radio" name="fmt" value="csv" checked> CSV</label><label><input type="radio" name="fmt" value="xlsx"> Excel</label></div></div>
+    </div>
+    <label class="seg" style="margin-top:10px"><span style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted)"><input type="checkbox" id="showRaw"> Also show raw API data reports (for troubleshooting)</span></label>
+  </section>
+
+  <section class="card">
+    <h2>3. Dates</h2>
+    <div class="sub" id="dateSub"></div>
+    <div class="grid">
+      <div><label class="l" for="from">From</label><input type="date" id="from"></div>
+      <div><label class="l" for="to">To</label><input type="date" id="to"></div>
+    </div>
+    <div class="row" style="margin-top:10px" id="presets">
+      <button data-p="yesterday">Yesterday</button><button data-p="7">Last 7 days</button><button data-p="30">Last 30 days</button>
+      <button data-p="mtd">This month</button><button data-p="lm">Last month</button><button data-p="ytd">Year to date</button>
+    </div>
+  </section>
+
+  <section class="card" id="detailsBox">
+    <h2>Report details <span class="hint" style="font-weight:400">(printed on the "Report Details" sheet)</span></h2>
+    <div class="grid" style="margin-top:8px">
+      <div><label class="l" for="uName">Generated by: name</label><input type="text" id="uName" placeholder="Accountant"></div>
+      <div><label class="l" for="uEmail">Generated by: email</label><input type="text" id="uEmail" placeholder="you@company.com"></div>
+    </div>
+  </section>
+
+  <div class="row"><button class="primary" id="go">Download</button><span class="hint" id="goHint"></span></div>
+</div>
+
+<section class="card hidden" id="prog">
+  <h2 id="progTitle">Progress</h2>
+  <div class="bar" style="height:10px;margin:8px 0 12px"><i id="allBar"></i></div>
+  <table><thead><tr><th>Account</th><th>Progress</th><th class="num">Rows</th><th>Status</th></tr></thead><tbody id="tbody"></tbody></table>
+  <div class="row" style="margin-top:12px"><button id="retry" class="hidden">Retry failed accounts</button><button id="again" class="hidden">Download the files again</button></div>
+  <div class="msg hidden" id="summary" style="margin-top:12px"></div>
+  <div class="msg warnb hidden" id="warns" style="margin-top:12px"></div>
+</section>
+
+<div class="msg bad hidden" id="fatal"></div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const CONCURRENCY = 4;
+const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+const PORTAL = {
+  cashflow: { label: 'Cash Flow Report', file: 'transactions', dateLabel: 'Date is the transaction date (same as the portal filter "Date is between").', note: 'Portal "Cash Flow Report": sheets Report Details, Summary and Transactions.' },
+  purchaseitems: { label: 'Purchase Items (Events and Reservations)', file: 'purchaseItems', dateLabel: 'Date is the arrival (trip) date.', note: 'Portal "Purchase Items" export: sheets Events and Reservations.' }
+};
+let KEY = ''; try { KEY = localStorage.getItem('xolaKey') || ''; } catch (e) {}
+let SELLERS = [], RAW = [], job = null, busy = false;
+
+/* ---------- api ---------- */
+async function api(name, body) {
+  const r = await fetch('/api/' + name, { method: 'POST', headers: { 'content-type': 'application/json', 'x-app-key': KEY }, body: JSON.stringify(body || {}) });
+  let j = {}; try { j = await r.json(); } catch (e) {}
+  if (r.status === 401 && j.error === 'unauthorized') { KEY = ''; try { localStorage.removeItem('xolaKey'); } catch (e) {} showLogin('Wrong password'); throw new Error('Wrong password'); }
+  if (!r.ok) { const e = new Error(j.error || ('Error ' + r.status)); e.status = r.status; throw e; }
+  return j;
+}
+
+/* ---------- start-up ---------- */
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+function showLogin(msg) {
+  $('login').classList.remove('hidden'); $('app').classList.add('hidden'); $('prog').classList.add('hidden');
+  const el = $('pwErr'); if (msg) { el.textContent = msg; el.classList.remove('hidden'); } else el.classList.add('hidden');
+}
+function showFatal(m) { const f = $('fatal'); f.textContent = m; f.classList.remove('hidden'); }
+function fillReports() {
+  let h = '<optgroup label="Xola portal reports">' + Object.keys(PORTAL).map(k => '<option value="' + k + '">' + esc(PORTAL[k].label) + '</option>').join('') + '</optgroup>';
+  if ($('showRaw').checked) h += '<optgroup label="Raw API data">' + RAW.map(r => '<option value="' + r.key + '">' + esc(r.label) + '</option>').join('') + '</optgroup>';
+  const cur = $('rep').value; $('rep').innerHTML = h; if (cur && [...$('rep').options].some(o => o.value === cur)) $('rep').value = cur;
+  onReport();
+}
+async function init() {
+  $('fatal').classList.add('hidden');
+  if (!KEY) return showLogin();
+  try {
+    const j = await api('sellers');
+    SELLERS = j.sellers; RAW = j.reports;
+    $('login').classList.add('hidden'); $('app').classList.remove('hidden');
+    $('accts').innerHTML = SELLERS.map(s => '<label><input type="checkbox" class="acct" value="' + esc(s.id) + '"> ' + esc(s.name) + '</label>').join('');
+    try { $('uName').value = localStorage.getItem('xolaUName') || j.user.name || ''; $('uEmail').value = localStorage.getItem('xolaUEmail') || j.user.email || ''; } catch (e) {}
+    fillReports(); countSel(); preset('lm');
+    if (!SELLERS.length) showFatal('Xola returned no accounts for this API key. Ask your admin to set XOLA_SELLERS in Vercel (see README).');
+  } catch (e) { if (e.message !== 'Wrong password') { $('login').classList.add('hidden'); showFatal(e.message); } }
+}
+$('pwGo').onclick = () => { KEY = $('pw').value; try { localStorage.setItem('xolaKey', KEY); } catch (e) {} init(); };
+$('pw').addEventListener('keydown', e => { if (e.key === 'Enter') $('pwGo').click(); });
+
+/* ---------- form ---------- */
+const selected = () => [...document.querySelectorAll('.acct:checked')].map(c => SELLERS.find(s => s.id === c.value));
+function countSel() { const n = selected().length; $('selCount').textContent = n + ' of ' + SELLERS.length + ' selected'; onReport(); }
+$('accts').onchange = countSel;
+$('selAll').onclick = () => { document.querySelectorAll('.acct').forEach(c => { c.checked = true; }); countSel(); };
+$('selNone').onclick = () => { document.querySelectorAll('.acct').forEach(c => { c.checked = false; }); countSel(); };
+$('showRaw').onchange = fillReports;
+const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+function preset(p) {
+  const t = new Date(), y = t.getFullYear(), m = t.getMonth(); let a, b;
+  if (p === 'yesterday') { a = b = new Date(y, m, t.getDate() - 1); }
+  else if (p === 'mtd') { a = new Date(y, m, 1); b = t; }
+  else if (p === 'lm') { a = new Date(y, m - 1, 1); b = new Date(y, m, 0); }
+  else if (p === 'ytd') { a = new Date(y, 0, 1); b = t; }
+  else { b = t; a = new Date(y, m, t.getDate() - (+p - 1)); }
+  $('from').value = iso(a); $('to').value = iso(b);
+}
+$('presets').onclick = e => { const p = e.target.dataset && e.target.dataset.p; if (p) preset(p); };
+function onReport() {
+  const k = $('rep').value, portal = !!PORTAL[k];
+  $('rawBox').classList.toggle('hidden', portal || selected().length < 2);
+  $('detailsBox').classList.toggle('hidden', k !== 'cashflow');
+  const raw = RAW.find(x => x.key === k);
+  $('repHint').textContent = portal ? PORTAL[k].note : (raw ? raw.note : '');
+  $('dateSub').textContent = portal ? PORTAL[k].dateLabel : 'Date as described in the report note above.';
+}
+$('rep').onchange = onReport;
+
+/* ---------- date chunks: one request per account per month keeps each call small and parallel ---------- */
+function monthChunks(from, to) {
+  const out = []; let a = from;
+  while (a <= to) {
+    const d = new Date(a + 'T00:00:00Z'); const end = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).toISOString().slice(0, 10);
+    const b = end < to ? end : to; out.push([a, b]);
+    a = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1)).toISOString().slice(0, 10);
+  }
+  return out;
+}
+const mid = (a, b) => { const x = Date.parse(a + 'T00:00:00Z'), y = Date.parse(b + 'T00:00:00Z'); return new Date(Math.floor((x + y) / 2 / 864e5) * 864e5).toISOString().slice(0, 10); };
+const nextDay = a => new Date(Date.parse(a + 'T00:00:00Z') + 864e5).toISOString().slice(0, 10);
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function fetchRange(loc, a, b) {      // -> { rows, meta, missing }
+  const endpoint = PORTAL[job.report] ? 'portal' : 'report';
+  let lastErr;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const j = await api(endpoint, { report: job.report, seller: loc.id, from: a, to: b });
+      if (j.split) { const m = mid(a, b); const r1 = await fetchRange(loc, a, m), r2 = await fetchRange(loc, nextDay(m), b); return { rows: r1.rows.concat(r2.rows), meta: r1.meta || r2.meta, missing: [...new Set((r1.missing || []).concat(r2.missing || []))] }; }
+      return { rows: j.rows, meta: j.meta, missing: j.missing || [] };
+    } catch (e) {
+      lastErr = e;
+      if (e.message === 'Wrong password' || (e.status && e.status < 500 && e.status !== 429)) throw e;
+      await sleep(800 * (attempt + 1));
+    }
+  }
+  throw lastErr;
+}
+
+/* ---------- running a job ---------- */
+function render() {
+  $('tbody').innerHTML = job.locs.map(l => {
+    const s = job.state[l.id], pct = s.total ? Math.round(100 * s.done / s.total) : 0;
+    const status = s.err ? '<span class="bad">' + esc(s.err) + '</span>' : s.done >= s.total ? (s.rows.length ? '<span class="ok">Done</span>' : '<span class="warn">No data in this period</span>') : s.started ? 'Working…' : 'Waiting';
+    return '<tr><td>' + esc(l.name) + '</td><td><div class="bar"><i style="width:' + pct + '%"></i></div></td><td class="num">' + s.rows.length.toLocaleString() + '</td><td>' + status + '</td></tr>';
+  }).join('');
+  let d = 0, t = 0; job.locs.forEach(l => { d += job.state[l.id].done; t += job.state[l.id].total; });
+  $('allBar').style.width = (t ? Math.round(100 * d / t) : 0) + '%';
+}
+async function runTasks(tasks) {
+  let i = 0;
+  const worker = async () => {
+    while (i < tasks.length) {
+      const t = tasks[i++], s = job.state[t.loc.id]; s.started = true;
+      if (s.err) { s.done++; render(); continue; }
+      try { const r = await fetchRange(t.loc, t.a, t.b); r.rows.forEach(x => s.rows.push(x)); if (r.meta) s.meta = r.meta; r.missing.forEach(m => s.missing.add(m)); }
+      catch (e) { s.err = e.message; }
+      s.done++; render();
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, tasks.length) }, worker));
+}
+function resetLoc(l) { job.state[l.id] = { rows: [], meta: null, missing: new Set(), done: 0, total: job.chunks.length, err: '', started: false }; }
+
+async function start(retryOnly) {
+  if (busy) return;
+  if (!retryOnly) {
+    const from = $('from').value, to = $('to').value, locs = selected();
+    if (!locs.length) return showFatal('Tick at least one account.');
+    if (!from || !to || from > to) return showFatal('Choose a valid From and To date.');
+    job = {
+      report: $('rep').value, from, to, fmt: document.querySelector('[name=fmt]:checked').value,
+      mode: locs.length > 1 ? document.querySelector('[name=mode]:checked').value : 'single', locs,
+      chunks: monthChunks(from, to), state: {}, userName: $('uName').value.trim(), userEmail: $('uEmail').value.trim()
+    };
+    try { localStorage.setItem('xolaUName', job.userName); localStorage.setItem('xolaUEmail', job.userEmail); } catch (e) {}
+    job.locs.forEach(resetLoc);
+  } else job.locs.filter(l => job.state[l.id].err).forEach(resetLoc);
+  $('fatal').classList.add('hidden');
+  busy = true; $('go').disabled = true; $('retry').classList.add('hidden'); $('again').classList.add('hidden'); $('summary').classList.add('hidden'); $('warns').classList.add('hidden');
+  $('prog').classList.remove('hidden');
+  const label = PORTAL[job.report] ? PORTAL[job.report].label : (RAW.find(r => r.key === job.report) || {}).label || job.report;
+  $('progTitle').textContent = label + ' · ' + job.from + ' to ' + job.to;
+  render();
+  const pending = job.locs.filter(l => job.state[l.id].done === 0);
+  const tasks = []; job.chunks.forEach(([a, b]) => pending.forEach(loc => tasks.push({ loc, a, b })));
+  try { await runTasks(tasks); } catch (e) { showFatal(e.message); }
+  busy = false; $('go').disabled = false;
+  await finish();
+}
+
+/* ======================= portal workbooks (ExcelJS) ======================= */
+const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const DT_FMT = 'yyyy-m-d hh:mm:ss';
+const wallDate = s => (s ? new Date(s + 'Z') : null);                 // wall-clock time, written as-is so Excel shows the same clock time
+const width = (vals, min) => Math.max(min || 7, Math.round(Math.max(...vals.map(v => (v == null ? 0 : String(v).length))) * 1.21 * 10) / 10);
+const r2 = n => Math.round(n * 100) / 100;
+const stamp = d => d.getFullYear() + '_' + String(d.getMonth() + 1).padStart(2, '0') + '_' + String(d.getDate()).padStart(2, '0') + '_' + String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0') + String(d.getSeconds()).padStart(2, '0');
+const longDate = iso => { const [y, m, d] = iso.split('-'); return (+d) + ' ' + MON[+m - 1] + ', ' + y; };
+const shortDate = iso => { const [y, m, d] = iso.split('-'); return (+m) + '/' + (+d) + '/' + y.slice(2); };
+const generated = () => new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).replace(/ /g, ' ');
+const blank = v => (v === undefined || v === null ? null : v);
+
+const CF_COLS = ['Transaction ID', 'Purchase ID', 'Confirmation Code', 'Transaction Date', 'Arrival Date', 'Realized Date', 'Package', 'Item', 'Customer Name', 'Currency', 'Gross', 'Processing Fee', 'Service Fee', 'Guest Fee', 'Net', 'Balance', 'Source', 'Method', 'CC Brand', 'Tags', 'Payout Date', 'Taxes & Fees', 'Card fee'];
+const CF_DATES = ['Transaction Date', 'Realized Date', 'Payout Date'];
+
+async function cashflowBook(loc, s) {
+  const wb = new ExcelJS.Workbook();
+  const rows = s.rows.slice().sort((a, b) => (b['Transaction Date'] < a['Transaction Date'] ? -1 : b['Transaction Date'] > a['Transaction Date'] ? 1 : String(b['Transaction ID']).localeCompare(String(a['Transaction ID']))));
+  // Report Details
+  const d = wb.addWorksheet('Report Details');
+  [['Report Name', 'Cash Flow Report'], [], ['Generated By'], ['Name', job.userName || null], ['Company', (s.meta && s.meta.company) || loc.name], ['Email', job.userEmail || null], ['Generated Date', generated()], [], ['Filters'], ['Date is between', shortDate(job.from) + ', ' + shortDate(job.to)]].forEach(r => d.addRow(r));
+  ['A1', 'B1', 'A3', 'A9'].forEach(c => { d.getCell(c).font = { bold: true }; });
+  d.getColumn(1).width = 18.7; d.getColumn(2).width = 31.7;
+  // Summary: one line per payment method (card brand added), totals of the money columns
+  const sm = wb.addWorksheet('Summary');
+  sm.addRow(['Summary Report', '(' + longDate(job.from) + ' - ' + longDate(job.to) + ')']); sm.addRow([]);
+  sm.addRow(['Method', 'Gross', 'Processing Fee', 'Service Fee', 'Guest Fee', 'Net']);
+  ['A1', 'B1'].forEach(c => { sm.getCell(c).font = { bold: true }; }); sm.getRow(3).font = { bold: true };
+  const by = {};
+  rows.forEach(r => { const k = (r['Method'] || '') + (r['CC Brand'] ? ' - ' + r['CC Brand'] : ''); const o = by[k] || (by[k] = [0, 0, 0, 0, 0]); ['Gross', 'Processing Fee', 'Service Fee', 'Guest Fee', 'Net'].forEach((c, i) => { o[i] += r[c] || 0; }); });
+  const keys = Object.keys(by).sort();
+  keys.forEach(k => sm.addRow([k].concat(by[k].map(r2))));
+  [['Method'].concat(keys), ['(' + longDate(job.from) + ' - ' + longDate(job.to) + ')'], ['Processing Fee'], ['Service Fee'], ['Guest Fee'], ['Net']].forEach((col, i) => { sm.getColumn(i + 1).width = width(col, i ? 8 : 7); });
+  sm.getColumn(1).width = width(['Summary Report'].concat(keys)); sm.getColumn(2).width = Math.max(width(['(' + longDate(job.from) + ' - ' + longDate(job.to) + ')']), 8);
+  // Transactions
+  const t = wb.addWorksheet('Transactions', { views: [{ state: 'frozen', ySplit: 1 }] });
+  t.addRow(CF_COLS); t.getRow(1).font = { bold: true };
+  rows.forEach(r => {
+    const row = t.addRow(CF_COLS.map(c => (CF_DATES.includes(c) ? wallDate(r[c]) : blank(r[c]))));
+    CF_DATES.forEach(c => { row.getCell(CF_COLS.indexOf(c) + 1).numFmt = DT_FMT; });
+  });
+  CF_COLS.forEach((c, i) => { t.getColumn(i + 1).width = CF_DATES.includes(c) && rows.some(r => r[c]) ? 23.4 : width([c].concat(rows.map(r => r[c])), 7); });
+  return wb.xlsx.writeBuffer();
+}
+
+const DEMO_ORDER = ['Seniors', 'Adults', 'Youth', 'Children', 'Infant'];
+const colL = n => { let s = ''; for (n; n > 0; n = Math.floor((n - 1) / 26)) s = String.fromCharCode(65 + ((n - 1) % 26)) + s; return s; };
+const sumDemo = r => Object.values(r.Demographics || {}).reduce((a, b) => a + b, 0);
+
+async function purchaseBook(loc, s) {
+  const wb = new ExcelJS.Workbook();
+  const rows = s.rows.slice().sort((a, b) => (a._sort < b._sort ? -1 : a._sort > b._sort ? 1 : String(a['Reservation ID']).localeCompare(String(b['Reservation ID']))));
+  const names = [...new Set(rows.flatMap(r => Object.keys(r.Demographics || {})))];
+  const demos = DEMO_ORDER.filter(n => names.includes(n)).concat(names.filter(n => !DEMO_ORDER.includes(n)).sort());
+  const guides = [...new Set(rows.flatMap(r => (r.Guides ? r.Guides.split(', ') : [])))].sort();
+  // ---- Events: one line per product + date + time ----
+  const ev = wb.addWorksheet('Events', { views: [{ state: 'frozen', ySplit: 1 }] });
+  const evHead = ['Name', 'Date', 'Time', 'Total Demographics'].concat(demos, ['Total Taxes & Fees', 'Card fee', 'Total Value', 'Revenue'], guides.map(g => g + ' (Guide)'));
+  ev.addRow(evHead); ev.getRow(1).font = { bold: true };
+  const groups = new Map();
+  rows.forEach(r => { const k = r.Product + '|' + r._sort; let g = groups.get(k); if (!g) { g = { r, list: [] }; groups.set(k, g); } g.list.push(r); });
+  const sumOf = (list, f) => { const v = list.map(f).filter(x => x !== undefined && x !== null); return v.length ? r2(v.reduce((a, b) => a + b, 0)) : null; };
+  const evRows = [];
+  [...groups.values()].sort((a, b) => (a.r._sort < b.r._sort ? -1 : a.r._sort > b.r._sort ? 1 : String(a.r.Product).localeCompare(String(b.r.Product)))).forEach(g => {
+    const L = g.list;
+    const row = [g.r.Product, g.r['Arrival Date'], g.r['Arrival Time'], sumOf(L, sumDemo)]
+      .concat(demos.map(n => sumOf(L, r => (r.Demographics && n in r.Demographics ? r.Demographics[n] : undefined))))
+      .concat([sumOf(L, r => r['Total Taxes & Fees'] === undefined ? 0 : r['Total Taxes & Fees']), sumOf(L, r => r['Card fee']), sumOf(L, r => r['Total Value']), sumOf(L, r => r['Revenue'])])
+      .concat(guides.map(n => (L.some(r => r.Guides && r.Guides.split(', ').includes(n)) ? 1 : null)));
+    evRows.push(row); ev.addRow(row);
+  });
+  evHead.forEach((h, i) => { ev.getColumn(i + 1).width = width([h].concat(evRows.map(r => r[i])), i === 0 ? 7 : 7); });
+  // ---- Reservations: two header rows (merged groups), then one line per reservation ----
+  const rs = wb.addWorksheet('Reservations', { views: [{ state: 'frozen', ySplit: 2 }] });
+  const cols = [];                                           // [top, sub, key]
+  const single = (top, key) => cols.push([top, null, key]);
+  single('Reservation ID', 'Reservation ID'); single('Purchase ID', 'Purchase ID'); single('Product', 'Product'); single('Arrival Date', 'Arrival Date'); single('Arrival Time', 'Arrival Time');
+  cols.push(['Customer', 'Name', 'Name']); cols.push(['Customer', 'Email', 'Email']);
+  cols.push(['Guest Breakdown', 'Total Demographics', '_total']); demos.forEach(n => cols.push(['Guest Breakdown', n, 'demo:' + n]));
+  single('Base Amount', 'Base Amount'); cols.push(['Taxes & Fees', 'Total Taxes & Fees', 'Total Taxes & Fees']); cols.push(['Taxes & Fees', 'Card fee', 'Card fee']);
+  ['Adjustments', 'Total Value', 'Revenue', 'Payment Status', 'Source', 'Status', 'Guides', 'Guest Status', 'Total Check-ins', 'Purchase Date', 'Purchased By', 'Tags', 'Confirmation Code'].forEach(k => single(k, k));
+  rs.addRow(cols.map((c, i) => (i && cols[i - 1][0] === c[0] && c[1] ? null : c[0])));
+  rs.addRow(cols.map(c => c[1]));
+  rs.getRow(1).font = { bold: true };
+  for (let i = 0; i < cols.length;) {                         // merge: single columns over both rows, groups across their columns
+    let j = i; while (j + 1 < cols.length && cols[j + 1][0] === cols[i][0] && cols[i][1]) j++;
+    if (!cols[i][1]) rs.mergeCells(colL(i + 1) + '1:' + colL(i + 1) + '2'); else rs.mergeCells(colL(i + 1) + '1:' + colL(j + 1) + '1');
+    i = j + 1;
+  }
+  const def0 = { 'Total Taxes & Fees': 1, 'Adjustments': 1, 'Total Check-ins': 1 };
+  rows.forEach(r => {
+    rs.addRow(cols.map(c => {
+      const k = c[2];
+      if (k === '_total') return Object.keys(r.Demographics || {}).length ? sumDemo(r) : null;
+      if (k.startsWith('demo:')) { const n = k.slice(5); return r.Demographics && n in r.Demographics ? r.Demographics[n] : null; }
+      const v = r[k]; return v === undefined || v === null ? (def0[k] ? 0 : null) : v;
+    }));
+  });
+  cols.forEach((c, i) => { const h = c[1] || c[0]; rs.getColumn(i + 1).width = width([h].concat(rows.map(r => (c[2] === '_total' || c[2].startsWith('demo:') ? '' : r[c[2]]))), 7); });
+  wb.addWorksheet('Worksheet');
+  return wb.xlsx.writeBuffer();
+}
+
+/* ======================= raw (CSV / simple Excel) ======================= */
+const PREFER = ['Location', 'id', 'createdAt', 'type', 'item.realizedAt', 'method', 'amount', 'currency', 'item.gross', 'item.net', 'arrival', 'arrivalDate', 'customerName', 'customerEmail', 'status'];
+function columns(rows) {
+  const seen = new Set(); rows.forEach(r => Object.keys(r).forEach(k => seen.add(k)));
+  const rest = [...seen].filter(k => !PREFER.includes(k)).sort();
+  return PREFER.filter(k => seen.has(k)).concat(rest);
+}
+function csvOf(rows) {
+  if (!rows.length) return '';
+  const cols = columns(rows);
+  const q = v => { if (v == null) return ''; const s = String(v); return /[",\n\r]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+  return '﻿' + cols.map(q).join(',') + '\r\n' + rows.map(r => cols.map(c => q(r[c])).join(',')).join('\r\n');
+}
+function xlsxOf(rows, sheet) {
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(rows, { header: columns(rows) }), (sheet || 'Report').replace(/[\\/?*\[\]:]/g, ' ').slice(0, 31));
+  return XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
+}
+const safe = s => String(s).replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '');
+function fileFor(rows, name, fmt, sheet) {
+  return fmt === 'xlsx' ? { name: name + '.xlsx', data: xlsxOf(rows, sheet), type: XLSX_MIME }
+    : { name: name + '.csv', data: new Blob([csvOf(rows)], { type: 'text/csv;charset=utf-8' }), type: 'text/csv' };
+}
+function save(blob, name) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 1500);
+}
+const asBlob = f => (f.data instanceof Blob ? f.data : new Blob([f.data], { type: f.type }));
+
+async function buildPortal() {
+  const p = PORTAL[job.report], ts = stamp(new Date()), files = [];
+  for (const l of job.locs) {
+    const s = job.state[l.id]; if (s.err || !s.rows.length) continue;
+    const buf = job.report === 'cashflow' ? await cashflowBook(l, s) : await purchaseBook(l, s);
+    files.push({ name: 'Xola_' + p.file + '_' + safe(l.name) + '_' + ts + '.xlsx', data: buf, type: XLSX_MIME });
+  }
+  if (!files.length) return 0;
+  if (files.length === 1) save(asBlob(files[0]), files[0].name);
+  else { const zip = new JSZip(); files.forEach(f => zip.file(f.name, f.data)); save(await zip.generateAsync({ type: 'blob' }), 'Xola_' + p.file + '_' + job.from + '_to_' + job.to + '.zip'); }
+  return files.length;
+}
+async function buildRaw() {
+  const base = 'Xola_' + job.report + '_' + job.from + '_to_' + job.to;
+  const withLoc = l => job.state[l.id].rows.map(r => Object.assign({ Location: l.name }, r));
+  const withData = job.locs.filter(l => !job.state[l.id].err && job.state[l.id].rows.length);
+  if (!withData.length) return 0;
+  if (job.mode === 'single') { const f = fileFor(withLoc(withData[0]), base + '_' + safe(withData[0].name), job.fmt, withData[0].name); save(asBlob(f), f.name); }
+  else if (job.mode === 'combined') { const f = fileFor([].concat(...withData.map(withLoc)), base + '_ALL_accounts', job.fmt, 'All accounts'); save(asBlob(f), f.name); }
+  else { const zip = new JSZip(); withData.forEach(l => { const f = fileFor(withLoc(l), base + '_' + safe(l.name), job.fmt, l.name); zip.file(f.name, f.data); }); save(await zip.generateAsync({ type: 'blob' }), base + '_by_account.zip'); }
+  return withData.length;
+}
+const buildAndSave = () => (PORTAL[job.report] ? buildPortal() : buildRaw());
+
+async function finish() {
+  const failed = job.locs.filter(l => job.state[l.id].err), empty = job.locs.filter(l => !job.state[l.id].err && !job.state[l.id].rows.length);
+  const total = job.locs.reduce((n, l) => n + job.state[l.id].rows.length, 0);
+  let n = 0; try { n = await buildAndSave(); } catch (e) { showFatal('Could not build the file: ' + e.message); }
+  const s = $('summary'); s.classList.remove('hidden', 'bad');
+  s.innerHTML = n ? '<b class="ok">Downloaded.</b> ' + total.toLocaleString() + ' rows from ' + n + ' account' + (n > 1 ? 's' : '') + (n > 1 && PORTAL[job.report] ? ', one file each in a ZIP' : '') + '.' : '<b class="warn">Nothing to download.</b> No rows found for this period.';
+  if (empty.length && n) s.innerHTML += ' No data: ' + empty.map(l => esc(l.name)).join(', ') + '.';
+  if (failed.length) { s.innerHTML += ' <b class="bad">Failed: ' + failed.map(l => esc(l.name)).join(', ') + '.</b> Use "Retry failed accounts".'; s.classList.add('bad'); $('retry').classList.remove('hidden'); }
+  if (n) $('again').classList.remove('hidden');
+  const w = $('warns'); const miss = job.locs.filter(l => job.state[l.id].missing.size);
+  if (PORTAL[job.report] && miss.length) { w.classList.remove('hidden'); w.innerHTML = '<b class="warn">Check these columns.</b> Xola did not return a value for: ' + miss.map(l => esc(l.name) + ' (' + [...job.state[l.id].missing].map(esc).join(', ') + ')').join('; ') + '. They are left blank in the file.'; }
+}
+$('go').onclick = () => start(false);
+$('retry').onclick = () => start(true);
+$('again').onclick = () => buildAndSave();
+
+init();
+</script>
+</body>
+</html>
