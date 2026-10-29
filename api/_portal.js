@@ -98,9 +98,10 @@ const localIso = w => w ? w.d + 'T' + w.t : undefined;                          
 
 async function sellerInfo(id) {
   const tzEnv = process.env.XOLA_TIMEZONE || 'UTC';
-  try { const s = await xget('/sellers/' + encodeURIComponent(id)); return { name: s.name || s.displayName || id, tz: s.timezone || s.timeZone || tzEnv }; }
-  catch (e) { if (e.status === 401) throw e; return { name: id, tz: tzEnv }; }
+  try { const s = await xget('/sellers/' + encodeURIComponent(id)); const tz = s.timezone || s.timeZone; return { name: s.name || s.displayName || id, tz: tz || tzEnv, tzKnown: !!(tz || process.env.XOLA_TIMEZONE) }; }
+  catch (e) { return { name: id, tz: tzEnv, tzKnown: !!process.env.XOLA_TIMEZONE }; }   // not allowed to read the account record: keep going, but warn that dates may be off
 }
+const tzWarn = info => (info.tzKnown ? [] : ['Time zone (assumed UTC: set XOLA_TIMEZONE in Vercel)']);
 const tagsOf = v => (Array.isArray(v) ? v.map(x => (x && typeof x === 'object' ? x.name || x.label || '' : x)).filter(Boolean).join(', ') : (has(v) ? String(v) : '')) || undefined;
 const title = s => has(s) ? String(s).replace(/[_-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : undefined;
 const confirmOf = v => { if (!has(v)) return undefined; const s = String(v); return /^\d+$/.test(s) && s.length < 16 ? Number(s) : s; };   // portal shows all-digit codes as numbers
@@ -131,7 +132,7 @@ async function cashflow(seller, from, to) {
       });
     });
   }));
-  const missing = CF_KEY.filter(k => rows.length && rows.every(r => !has(r[k])));
+  const missing = CF_KEY.filter(k => rows.length && rows.every(r => !has(r[k]))).concat(rows.length ? tzWarn(info) : []);
   return { meta: { company: info.name, timezone: info.tz }, rows, missing };
 }
 
@@ -170,7 +171,7 @@ async function purchaseitems(seller, from, to) {
       });
     });
   });
-  const missing = PI_KEY.filter(k => rows.length && rows.every(r => !has(r[k])));
+  const missing = PI_KEY.filter(k => rows.length && rows.every(r => !has(r[k]))).concat(rows.length ? tzWarn(info) : []);
   return { meta: { company: info.name, timezone: info.tz }, rows, missing };
 }
 

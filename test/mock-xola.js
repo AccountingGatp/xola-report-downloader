@@ -11,11 +11,14 @@ http.createServer((req, res) => {
   const u = new URL(req.url, 'http://x'); const q = u.searchParams;
   const out = (o, c) => { res.statusCode = c || 200; res.setHeader('content-type', 'application/json'); res.end(JSON.stringify(o)); };
   if (req.headers['x-api-key'] !== 'testkey') return out({ error: 'bad key' }, 401);
+  if (process.env.MOCK_DENY_SELLERS === '1' && u.pathname.startsWith('/sellers')) return out({ error: 'forbidden' }, 403);   // key may not read the account list
   if (u.pathname === '/sellers') return out({ data: SELLERS });
   const skip = +q.get('skip') || 0, limit = +q.get('limit') || 20;
   let all = [];
   if (u.pathname === '/transactions') {
-    const s = q.get('seller'); if (!s) return out({ error: 'seller required' }, 400);
+    const s = q.get('seller');
+    if (!s && /payout/.test(q.get('type') || '')) return out({ data: SELLERS.flatMap(x => tx(x.id, q.get('type'), q.get('createdAt[gte]'), '2099-01-01').slice(0, 1)), paging: {} });   // payouts across sellers
+    if (!s) return out({ error: 'seller required' }, 400);
     all = tx(s, q.get('type') || 'purchase', q.get('createdAt[gte]'), q.get('createdAt[lt]'));
     const page = all.slice(skip, skip + limit);
     return out({ data: page, paging: skip + limit < all.length ? { next: '/api/transactions?' + [...q.entries()].filter(([k]) => k !== 'skip').map(([k, v]) => k + '=' + v).join('&') + '&skip=' + (skip + limit) } : {} });

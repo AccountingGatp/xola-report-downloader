@@ -28,6 +28,16 @@ const call = (name, body, key) => fetch('http://localhost:3100/api/' + name, { m
     r = await call('report', { report: 'sales', seller: 's1', from: '2026-09-09', to: '2026-09-01' }); assert.strictEqual(r.s, 400);
     r = await call('report', { report: 'sales', seller: 's1/../x', from: '2026-09-01', to: '2026-09-02' }); assert.strictEqual(r.s, 400);
     console.log('ALL API TESTS PASSED');
+    // Xola refuses the account list (403): accounts must still be found from recent payouts, and nothing may report "bad key"
+    const env2 = Object.assign({}, env, { XOLA_BASE: 'http://localhost:4011', MOCK_DENY_SELLERS: '1' });
+    procs.push(spawn('node', ['test/mock-xola.js', '4011'], { env: env2 }), spawn('node', ['dev-server.js', '3101'], { env: env2 }));
+    await sleep(800);
+    const call2 = (name, body) => fetch('http://localhost:3101/api/' + name, { method: 'POST', headers: { 'content-type': 'application/json', 'x-app-key': 'pw' }, body: JSON.stringify(body || {}) }).then(async r => ({ s: r.status, j: await r.json() }));
+    r = await call2('sellers'); assert.strictEqual(r.s, 200, 'account list must fall back to payouts, got ' + r.s + ' ' + JSON.stringify(r.j));
+    assert.strictEqual(r.j.sellers.length, 3); assert.strictEqual(r.j.source, 'payouts'); console.log('403 on /sellers -> accounts found from payouts:', r.j.sellers.map(s => s.id).join(', '));
+    r = await call2('portal', { report: 'purchaseitems', seller: 's1', from: '2026-09-01', to: '2026-09-02' });
+    assert.strictEqual(r.s, 200); assert.ok((r.j.missing || []).some(m => /Time zone/.test(m)), 'time zone warning when the account record is unreadable'); console.log('403 on account record -> report still runs, time-zone warning:', r.j.missing.filter(m => /Time zone/.test(m))[0]);
+    console.log('ALL FALLBACK TESTS PASSED');
   } catch (e) { console.error('TEST FAILED:', e.message); process.exitCode = 1; }
   procs.forEach(p => p.kill());
 })();

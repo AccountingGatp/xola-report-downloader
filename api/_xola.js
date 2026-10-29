@@ -28,7 +28,8 @@ async function xget(path) {
   if (!r.ok) {
     const e = new Error('Xola answered ' + r.status + ' for ' + p.split('?')[0]);
     e.status = r.status === 401 || r.status === 403 ? 401 : (r.status === 429 ? 429 : 502);
-    if (r.status === 401 || r.status === 403) e.message = 'Xola rejected the API key (' + r.status + '). Check XOLA_API_KEY in Vercel.';
+    e.http = r.status; e.path = p.split('?')[0];
+    if (r.status === 401 || r.status === 403) e.message = 'Xola refused the request (' + r.status + ') for ' + e.path + '. Check XOLA_API_KEY in Vercel (no quotes or spaces) and that the key may read this data.';
     throw e;
   }
   return r.json();
@@ -114,26 +115,32 @@ async function listSellers() {
   if (process.env.XOLA_SELLERS) {                                   // {"Location name":"sellerId"}
     try { const m = JSON.parse(process.env.XOLA_SELLERS); Object.keys(m).forEach(n => out.set(m[n], n)); source = 'XOLA_SELLERS'; } catch (e) { /* ignore bad JSON, fall through */ }
   }
-  if (!out.size) {
+  const errs = [];
+  if (!out.size) {                                                   // 1) ask Xola for the account list (some keys are not allowed to)
     try {
       const recs = await allPages('/sellers', 10);
       recs.forEach(s => { if (s && s.id) out.set(s.id, s.name || s.displayName || s.id); });
       if (out.size) source = 'sellers';
-    } catch (e) { if (e.status === 401) throw e; }
+    } catch (e) { errs.push(e); }
   }
-  if (!out.size) {                                                   // last resort: sellers seen on recent payouts
+  if (!out.size) {                                                   // 2) fall back to the sellers seen on recent payouts (what the Empire Categoriser does)
     const from = new Date(Date.now() - 90 * 864e5).toISOString().slice(0, 10);
     for (const t of ['auto_payout', 'payout']) {
       try {
         const recs = await allPages('/transactions?type=' + t + '&exclude=remoteTransactions&createdAt[gte]=' + from, 15);
         recs.forEach(r => { const id = r.seller && (typeof r.seller === 'object' ? r.seller.id : r.seller); if (id) out.set(id, out.get(id) || id); });
-      } catch (e) { if (e.status === 401) throw e; }
+      } catch (e) { errs.push(e); }
     }
     for (const id of [...out.keys()]) {
       if (out.get(id) !== id) continue;
       try { const s = await xget('/sellers/' + encodeURIComponent(id)); out.set(id, s.name || s.displayName || id); } catch (e) { /* keep id */ }
     }
     if (out.size) source = 'payouts';
+  }
+  if (!out.size && errs.length) {                                    // nothing worked: say exactly what Xola refused, and the manual way out
+    const e = new Error('Could not get the account list from Xola. ' + [...new Set(errs.map(x => x.message))].join(' ') +
+      ' You can also list the accounts yourself: in Vercel add XOLA_SELLERS = {"Account name":"sellerId"} and redeploy.');
+    e.status = 502; throw e;
   }
   const sellers = [...out.entries()].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   return { sellers, source };
