@@ -98,8 +98,8 @@ const localIso = w => w ? w.d + 'T' + w.t : undefined;                          
 
 async function sellerInfo(id) {
   const tzEnv = process.env.XOLA_TIMEZONE || 'UTC';
-  try { const s = await xget('/sellers/' + encodeURIComponent(id)); const tz = s.timezone || s.timeZone; return { name: s.name || s.displayName || id, tz: tz || tzEnv, tzKnown: !!(tz || process.env.XOLA_TIMEZONE) }; }
-  catch (e) { return { name: id, tz: tzEnv, tzKnown: !!process.env.XOLA_TIMEZONE }; }   // not allowed to read the account record: keep going, but warn that dates may be off
+  try { const s = await xget('/sellers/' + encodeURIComponent(id)); const tz = s.timezone || s.timeZone; const em = pick([s], ['email', 'contactEmail', 'contact.email', 'owner.email']); return { name: s.name || s.displayName || id, email: has(em) ? String(em) : '', tz: tz || tzEnv, tzKnown: !!(tz || process.env.XOLA_TIMEZONE) }; }
+  catch (e) { return { name: id, email: '', tz: tzEnv, tzKnown: !!process.env.XOLA_TIMEZONE }; }   // not allowed to read the account record: keep going, but warn that dates may be off
 }
 const tzWarn = info => (info.tzKnown ? [] : ['Time zone (assumed UTC: set XOLA_TIMEZONE in Vercel)']);
 const tagsOf = v => (Array.isArray(v) ? v.map(x => (x && typeof x === 'object' ? x.name || x.label || '' : x)).filter(Boolean).join(', ') : (has(v) ? String(v) : '')) || undefined;
@@ -133,7 +133,7 @@ async function cashflow(seller, from, to) {
     });
   }));
   const missing = CF_KEY.filter(k => rows.length && rows.every(r => !has(r[k]))).concat(rows.length ? tzWarn(info) : []);
-  return { meta: { company: info.name, timezone: info.tz }, rows, missing };
+  return { meta: { company: info.name, email: info.email, timezone: info.tz }, rows, missing };
 }
 
 // ======================= Purchase Items (Events + Reservations) =======================
@@ -172,7 +172,7 @@ async function purchaseitems(seller, from, to) {
     });
   });
   const missing = PI_KEY.filter(k => rows.length && rows.every(r => !has(r[k]))).concat(rows.length ? tzWarn(info) : []);
-  return { meta: { company: info.name, timezone: info.tz }, rows, missing };
+  return { meta: { company: info.name, email: info.email, timezone: info.tz }, rows, missing };
 }
 
 module.exports = { cashflow, purchaseitems, PORTAL: { cashflow, purchaseitems } };

@@ -13,7 +13,9 @@
 | **Purchase Items** | `Xola_purchaseItems_...xlsx`: sheets *Events*, *Reservations* (two header rows with merged groups), *Worksheet* | arrival (trip) date |
 
 Times are shown in the account's own time zone, like the portal. Dates are real Excel date-times (same look as the portal's, not text formulas).
-Tick "Also show raw API data reports" to get plain CSV/Excel dumps of every field Xola returns (used for troubleshooting).
+Files are named like the portal's: `Xola_transactions_<account e-mail>_<yyyy_mm_dd_hhmmss>.xlsx` and `Xola_purchaseItems_...` (the account name is used if Xola gives no e-mail).
+
+**Troubleshooting page:** add `?debug=1` to the web address. It shows an extra "Read field names" button (the field names Xola uses for the first ticked account, personal values hidden) and the raw API data reports. Normal users only see the two portal reports.
 
 ## Check the first download against the portal
 
@@ -55,4 +57,4 @@ node dev-server.js 3000      # needs APP_PASSWORD, XOLA_API_KEY (and XOLA_BASE f
 ```
 
 ## Files
-`public/index.html` (page and Excel builders) · `api/sellers.js` (accounts + login check) · `api/portal.js` + `api/_portal.js` (portal reports) · `api/report.js` + `api/_xola.js` (raw reports, Xola calls) · `vercel.json`
+`public/index.html` (page and Excel builders) · `api/sellers.js` (accounts + login check) · `api/portal.js` + `api/_portal.js` (portal reports) · `api/probe.js` (field names, debug only) · `api/report.js` + `api/_xola.js` (raw reports, Xola calls) · `vercel.json`

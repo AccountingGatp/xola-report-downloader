@@ -35,6 +35,9 @@ async function xget(path) {
   return r.json();
 }
 
+// The records of a list answer: Xola may send a bare array, {data:[...]}, or {orders|sellers|transactions:[...]}.
+const listOf = j => Array.isArray(j) ? j : (j && (Array.isArray(j.data) ? j.data : ['orders', 'transactions', 'sellers', 'items', 'results'].map(k => j[k]).find(Array.isArray) || Object.values(j).find(Array.isArray))) || [];
+
 // Reads every page of a list endpoint. Uses paging.next when Xola gives it, otherwise skip/limit.
 async function allPages(path, maxPages = 60) {
   const rows = [];
@@ -42,7 +45,7 @@ async function allPages(path, maxPages = 60) {
   let skip = 0, firstId = null;
   for (let page = 0; page < maxPages && cur; page++) {
     const j = await xget(cur);
-    const data = Array.isArray(j) ? j : (j.data || []);
+    const data = listOf(j);
     if (page > 0 && data.length && data[0] && firstId != null && data[0].id === firstId) break;   // server ignored skip: stop, don't loop
     if (page === 0 && data.length) firstId = data[0].id;
     rows.push(...data);
@@ -146,4 +149,4 @@ async function listSellers() {
   return { sellers, source };
 }
 
-module.exports = { guard, send, REPORTS, fetchReport, listSellers, isDate, addDays, xget, allPages, dateVal };
+module.exports = { guard, send, REPORTS, fetchReport, listSellers, isDate, addDays, xget, allPages, listOf, dateVal };

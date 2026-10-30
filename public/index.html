@@ -43,6 +43,10 @@ td.num{font-variant-numeric:tabular-nums;text-align:right}
 .msg{padding:10px 12px;border-radius:8px;border:1px solid var(--line);font-size:13px}
 .msg.bad{border-color:var(--bad)}.msg.warnb{border-color:var(--warn)}
 .hidden{display:none}
+.loading{display:flex;gap:10px;align-items:center;padding:14px 4px;color:var(--muted)}
+.spin{width:18px;height:18px;border:3px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:sp .8s linear infinite;flex:none}
+@keyframes sp{to{transform:rotate(360deg)}}
+textarea{width:100%;min-height:220px;font:12px/1.4 ui-monospace,Menlo,Consolas,monospace;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--surface);color:var(--ink)}
 </style>
 </head>
 <body>
@@ -60,8 +64,8 @@ td.num{font-variant-numeric:tabular-nums;text-align:right}
   <section class="card">
     <h2>1. Accounts</h2>
     <div class="sub">Tick one or more. Each ticked account gets its own file.</div>
-    <div class="row" style="margin-bottom:8px"><button id="selAll">Select all</button><button id="selNone">Clear</button><span class="hint" id="selCount"></span></div>
-    <div class="accts" id="accts"></div>
+    <div class="row" style="margin-bottom:8px"><button id="selAll" disabled>Select all</button><button id="selNone" disabled>Clear</button><span class="hint" id="selCount"></span></div>
+    <div class="accts" id="accts"><div class="loading"><span class="spin"></span><span>Loading accounts from Xola…</span></div></div>
   </section>
 
   <section class="card">
@@ -71,7 +75,6 @@ td.num{font-variant-numeric:tabular-nums;text-align:right}
       <div id="rawBox" class="hidden"><label class="l">For several accounts</label><div class="seg"><label><input type="radio" name="mode" value="combined" checked> One combined file</label><label><input type="radio" name="mode" value="separate"> One file per account (ZIP)</label></div>
         <label class="l" style="margin-top:8px">File format</label><div class="seg"><label><input type="radio" name="fmt" value="csv" checked> CSV</label><label><input type="radio" name="fmt" value="xlsx"> Excel</label></div></div>
     </div>
-    <label class="seg" style="margin-top:10px"><span style="display:flex;gap:6px;align-items:center;font-size:12px;color:var(--muted)"><input type="checkbox" id="showRaw"> Also show raw API data reports (for troubleshooting)</span></label>
   </section>
 
   <section class="card">
@@ -95,8 +98,15 @@ td.num{font-variant-numeric:tabular-nums;text-align:right}
     </div>
   </section>
 
-  <div class="row"><button class="primary" id="go">Download</button><span class="hint" id="goHint"></span></div>
+  <div class="row"><button class="primary" id="go" disabled>Download</button><span class="hint" id="goHint">Waiting for accounts…</span></div>
 </div>
+
+<section class="card hidden" id="dbg">
+  <h2>Troubleshooting: Xola field names</h2>
+  <div class="sub">Reads the field names Xola uses for the first ticked account (personal values are hidden). Copy the text and send it to your support contact.</div>
+  <div class="row" style="margin-bottom:8px"><button id="probe">Read field names</button><button id="probeCopy" class="hidden">Copy</button></div>
+  <textarea id="probeOut" class="hidden" readonly></textarea>
+</section>
 
 <section class="card hidden" id="prog">
   <h2 id="progTitle">Progress</h2>
@@ -119,6 +129,7 @@ const PORTAL = {
   purchaseitems: { label: 'Purchase Items (Events and Reservations)', file: 'purchaseItems', dateLabel: 'Date is the arrival (trip) date.', note: 'Portal "Purchase Items" export: sheets Events and Reservations.' }
 };
 let KEY = ''; try { KEY = localStorage.getItem('xolaKey') || ''; } catch (e) {}
+const DEBUG = /[?&]debug=1/.test(location.search);   // reveals the raw API reports and the field-name probe
 let SELLERS = [], RAW = [], job = null, busy = false;
 
 /* ---------- api ---------- */
@@ -136,25 +147,35 @@ function showLogin(msg) {
   $('login').classList.remove('hidden'); $('app').classList.add('hidden'); $('prog').classList.add('hidden');
   const el = $('pwErr'); if (msg) { el.textContent = msg; el.classList.remove('hidden'); } else el.classList.add('hidden');
 }
-function showFatal(m) { const f = $('fatal'); f.textContent = m; f.classList.remove('hidden'); }
+function showFatal(m) { const f = $('fatal'); f.textContent = m; f.classList.remove('hidden'); toView(f); }
+function toView(el) { try { if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); } catch (e) {} }
 function fillReports() {
   let h = '<optgroup label="Xola portal reports">' + Object.keys(PORTAL).map(k => '<option value="' + k + '">' + esc(PORTAL[k].label) + '</option>').join('') + '</optgroup>';
-  if ($('showRaw').checked) h += '<optgroup label="Raw API data">' + RAW.map(r => '<option value="' + r.key + '">' + esc(r.label) + '</option>').join('') + '</optgroup>';
+  if (DEBUG) h += '<optgroup label="Raw API data (troubleshooting)">' + RAW.map(r => '<option value="' + r.key + '">' + esc(r.label) + '</option>').join('') + '</optgroup>';
   const cur = $('rep').value; $('rep').innerHTML = h; if (cur && [...$('rep').options].some(o => o.value === cur)) $('rep').value = cur;
   onReport();
+}
+function accountsError(msg) {
+  $('accts').innerHTML = '<div style="padding:8px 2px"><div class="msg bad">' + esc(msg) + '</div><div class="row" style="margin-top:8px"><button id="acctRetry">Try again</button></div></div>';
+  $('acctRetry').onclick = init; $('goHint').textContent = 'Accounts could not be loaded.';
 }
 async function init() {
   $('fatal').classList.add('hidden');
   if (!KEY) return showLogin();
+  $('login').classList.add('hidden'); $('app').classList.remove('hidden');
+  $('accts').innerHTML = '<div class="loading"><span class="spin"></span><span>Loading accounts from Xola… this can take a few seconds.</span></div>';
+  $('go').disabled = true; $('selAll').disabled = $('selNone').disabled = true; $('goHint').textContent = 'Waiting for accounts…'; $('selCount').textContent = '';
+  fillReports(); preset('lm');
   try {
     const j = await api('sellers');
     SELLERS = j.sellers; RAW = j.reports;
-    $('login').classList.add('hidden'); $('app').classList.remove('hidden');
+    if (!SELLERS.length) return accountsError('Xola returned no accounts for this API key. Ask your admin to set XOLA_SELLERS in Vercel (see README).');
     $('accts').innerHTML = SELLERS.map(s => '<label><input type="checkbox" class="acct" value="' + esc(s.id) + '"> ' + esc(s.name) + '</label>').join('');
     try { $('uName').value = localStorage.getItem('xolaUName') || j.user.name || ''; $('uEmail').value = localStorage.getItem('xolaUEmail') || j.user.email || ''; } catch (e) {}
-    fillReports(); countSel(); preset('lm');
-    if (!SELLERS.length) showFatal('Xola returned no accounts for this API key. Ask your admin to set XOLA_SELLERS in Vercel (see README).');
-  } catch (e) { if (e.message !== 'Wrong password') { $('login').classList.add('hidden'); showFatal(e.message); } }
+    $('go').disabled = false; $('selAll').disabled = $('selNone').disabled = false; $('goHint').textContent = '';
+    if (DEBUG) $('dbg').classList.remove('hidden');
+    fillReports(); countSel();
+  } catch (e) { if (e.message !== 'Wrong password') accountsError(e.message); }
 }
 $('pwGo').onclick = () => { KEY = $('pw').value; try { localStorage.setItem('xolaKey', KEY); } catch (e) {} init(); };
 $('pw').addEventListener('keydown', e => { if (e.key === 'Enter') $('pwGo').click(); });
@@ -165,7 +186,6 @@ function countSel() { const n = selected().length; $('selCount').textContent = n
 $('accts').onchange = countSel;
 $('selAll').onclick = () => { document.querySelectorAll('.acct').forEach(c => { c.checked = true; }); countSel(); };
 $('selNone').onclick = () => { document.querySelectorAll('.acct').forEach(c => { c.checked = false; }); countSel(); };
-$('showRaw').onchange = fillReports;
 const iso = d => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
 function preset(p) {
   const t = new Date(), y = t.getFullYear(), m = t.getMonth(); let a, b;
@@ -259,7 +279,7 @@ async function start(retryOnly) {
   } else job.locs.filter(l => job.state[l.id].err).forEach(resetLoc);
   $('fatal').classList.add('hidden');
   busy = true; $('go').disabled = true; $('retry').classList.add('hidden'); $('again').classList.add('hidden'); $('summary').classList.add('hidden'); $('warns').classList.add('hidden');
-  $('prog').classList.remove('hidden');
+  $('prog').classList.remove('hidden'); toView($('prog'));
   const label = PORTAL[job.report] ? PORTAL[job.report].label : (RAW.find(r => r.key === job.report) || {}).label || job.report;
   $('progTitle').textContent = label + ' · ' + job.from + ' to ' + job.to;
   render();
@@ -274,7 +294,7 @@ async function start(retryOnly) {
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const DT_FMT = 'yyyy-m-d hh:mm:ss';
 const wallDate = s => (s ? new Date(s + 'Z') : null);                 // wall-clock time, written as-is so Excel shows the same clock time
-const width = (vals, min) => Math.max(min || 7, Math.round(Math.max(...vals.map(v => (v == null ? 0 : String(v).length))) * 1.21 * 10) / 10);
+const width = vals => Math.floor(Math.round(Math.max(...vals.map(v => (v == null ? 0 : String(v).length))) * 8.25 + 7.5) / 7 * 100 - 1e-9) / 100;   // the portal's auto-size rule: whole pixels (8.25 per character + 7.5) divided by 7; reproduces every column of both sample files
 const r2 = n => Math.round(n * 100) / 100;
 const stamp = d => d.getFullYear() + '_' + String(d.getMonth() + 1).padStart(2, '0') + '_' + String(d.getDate()).padStart(2, '0') + '_' + String(d.getHours()).padStart(2, '0') + String(d.getMinutes()).padStart(2, '0') + String(d.getSeconds()).padStart(2, '0');
 const longDate = iso => { const [y, m, d] = iso.split('-'); return (+d) + ' ' + MON[+m - 1] + ', ' + y; };
@@ -282,6 +302,11 @@ const shortDate = iso => { const [y, m, d] = iso.split('-'); return (+m) + '/' +
 const generated = () => new Date().toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' }).replace(/ /g, ' ');
 const blank = v => (v === undefined || v === null ? null : v);
 
+const mk = (wb, name, opts, landscape) => {       // same print setup as the portal files: Letter paper, 14.4 row height, landscape on the wide sheets
+  const ws = wb.addWorksheet(name, Object.assign({ properties: { defaultRowHeight: 14.4 } }, opts || {}));
+  ws.pageSetup = Object.assign({ paperSize: 1 }, landscape ? { orientation: 'landscape' } : {});
+  return ws;
+};
 const CF_COLS = ['Transaction ID', 'Purchase ID', 'Confirmation Code', 'Transaction Date', 'Arrival Date', 'Realized Date', 'Package', 'Item', 'Customer Name', 'Currency', 'Gross', 'Processing Fee', 'Service Fee', 'Guest Fee', 'Net', 'Balance', 'Source', 'Method', 'CC Brand', 'Tags', 'Payout Date', 'Taxes & Fees', 'Card fee'];
 const CF_DATES = ['Transaction Date', 'Realized Date', 'Payout Date'];
 
@@ -289,12 +314,12 @@ async function cashflowBook(loc, s) {
   const wb = new ExcelJS.Workbook();
   const rows = s.rows.slice().sort((a, b) => (b['Transaction Date'] < a['Transaction Date'] ? -1 : b['Transaction Date'] > a['Transaction Date'] ? 1 : String(b['Transaction ID']).localeCompare(String(a['Transaction ID']))));
   // Report Details
-  const d = wb.addWorksheet('Report Details');
+  const d = mk(wb, 'Report Details');
   [['Report Name', 'Cash Flow Report'], [], ['Generated By'], ['Name', job.userName || null], ['Company', (s.meta && s.meta.company) || loc.name], ['Email', job.userEmail || null], ['Generated Date', generated()], [], ['Filters'], ['Date is between', shortDate(job.from) + ', ' + shortDate(job.to)]].forEach(r => d.addRow(r));
   ['A1', 'B1', 'A3', 'A9'].forEach(c => { d.getCell(c).font = { bold: true }; });
   d.getColumn(1).width = 18.7; d.getColumn(2).width = 31.7;
   // Summary: one line per payment method (card brand added), totals of the money columns
-  const sm = wb.addWorksheet('Summary');
+  const sm = mk(wb, 'Summary');
   sm.addRow(['Summary Report', '(' + longDate(job.from) + ' - ' + longDate(job.to) + ')']); sm.addRow([]);
   sm.addRow(['Method', 'Gross', 'Processing Fee', 'Service Fee', 'Guest Fee', 'Net']);
   ['A1', 'B1'].forEach(c => { sm.getCell(c).font = { bold: true }; }); sm.getRow(3).font = { bold: true };
@@ -302,16 +327,16 @@ async function cashflowBook(loc, s) {
   rows.forEach(r => { const k = (r['Method'] || '') + (r['CC Brand'] ? ' - ' + r['CC Brand'] : ''); const o = by[k] || (by[k] = [0, 0, 0, 0, 0]); ['Gross', 'Processing Fee', 'Service Fee', 'Guest Fee', 'Net'].forEach((c, i) => { o[i] += r[c] || 0; }); });
   const keys = Object.keys(by).sort();
   keys.forEach(k => sm.addRow([k].concat(by[k].map(r2))));
-  [['Method'].concat(keys), ['(' + longDate(job.from) + ' - ' + longDate(job.to) + ')'], ['Processing Fee'], ['Service Fee'], ['Guest Fee'], ['Net']].forEach((col, i) => { sm.getColumn(i + 1).width = width(col, i ? 8 : 7); });
-  sm.getColumn(1).width = width(['Summary Report'].concat(keys)); sm.getColumn(2).width = Math.max(width(['(' + longDate(job.from) + ' - ' + longDate(job.to) + ')']), 8);
+  const sumTitle = '(' + longDate(job.from) + ' - ' + longDate(job.to) + ')', heads = ['Method', 'Gross', 'Processing Fee', 'Service Fee', 'Guest Fee', 'Net'];
+  heads.forEach((h, i) => { sm.getColumn(i + 1).width = width(i === 0 ? ['Summary Report', h].concat(keys) : (i === 1 ? [sumTitle, h] : [h]).concat(keys.map(k => by[k][i - 1])), 7); });
   // Transactions
-  const t = wb.addWorksheet('Transactions', { views: [{ state: 'frozen', ySplit: 1 }] });
+  const t = mk(wb, 'Transactions', { views: [{ state: 'frozen', ySplit: 1 }] }, true);
   t.addRow(CF_COLS); t.getRow(1).font = { bold: true };
   rows.forEach(r => {
     const row = t.addRow(CF_COLS.map(c => (CF_DATES.includes(c) ? wallDate(r[c]) : blank(r[c]))));
     CF_DATES.forEach(c => { row.getCell(CF_COLS.indexOf(c) + 1).numFmt = DT_FMT; });
   });
-  CF_COLS.forEach((c, i) => { t.getColumn(i + 1).width = CF_DATES.includes(c) && rows.some(r => r[c]) ? 23.4 : width([c].concat(rows.map(r => r[c])), 7); });
+  CF_COLS.forEach((c, i) => { t.getColumn(i + 1).width = CF_DATES.includes(c) && rows.some(r => r[c]) ? width(['2026-10-27 21:33:54']) : width([c].concat(rows.map(r => r[c]))); });
   return wb.xlsx.writeBuffer();
 }
 
@@ -326,7 +351,7 @@ async function purchaseBook(loc, s) {
   const demos = DEMO_ORDER.filter(n => names.includes(n)).concat(names.filter(n => !DEMO_ORDER.includes(n)).sort());
   const guides = [...new Set(rows.flatMap(r => (r.Guides ? r.Guides.split(', ') : [])))].sort();
   // ---- Events: one line per product + date + time ----
-  const ev = wb.addWorksheet('Events', { views: [{ state: 'frozen', ySplit: 1 }] });
+  const ev = mk(wb, 'Events', { views: [{ state: 'frozen', ySplit: 1 }] });
   const evHead = ['Name', 'Date', 'Time', 'Total Demographics'].concat(demos, ['Total Taxes & Fees', 'Card fee', 'Total Value', 'Revenue'], guides.map(g => g + ' (Guide)'));
   ev.addRow(evHead); ev.getRow(1).font = { bold: true };
   const groups = new Map();
@@ -343,7 +368,7 @@ async function purchaseBook(loc, s) {
   });
   evHead.forEach((h, i) => { ev.getColumn(i + 1).width = width([h].concat(evRows.map(r => r[i])), i === 0 ? 7 : 7); });
   // ---- Reservations: two header rows (merged groups), then one line per reservation ----
-  const rs = wb.addWorksheet('Reservations', { views: [{ state: 'frozen', ySplit: 2 }] });
+  const rs = mk(wb, 'Reservations', { views: [{ state: 'frozen', ySplit: 2 }] });
   const cols = [];                                           // [top, sub, key]
   const single = (top, key) => cols.push([top, null, key]);
   single('Reservation ID', 'Reservation ID'); single('Purchase ID', 'Purchase ID'); single('Product', 'Product'); single('Arrival Date', 'Arrival Date'); single('Arrival Time', 'Arrival Time');
@@ -369,7 +394,7 @@ async function purchaseBook(loc, s) {
     }));
   });
   cols.forEach((c, i) => { const h = c[1] || c[0]; rs.getColumn(i + 1).width = width([h].concat(rows.map(r => (c[2] === '_total' || c[2].startsWith('demo:') ? '' : r[c[2]]))), 7); });
-  wb.addWorksheet('Worksheet');
+  mk(wb, 'Worksheet', null, true);
   return wb.xlsx.writeBuffer();
 }
 
@@ -392,6 +417,7 @@ function xlsxOf(rows, sheet) {
   return XLSX.write(wb, { type: 'array', bookType: 'xlsx' });
 }
 const safe = s => String(s).replace(/[^A-Za-z0-9._-]+/g, '_').replace(/^_+|_+$/g, '');
+const safeFile = s => String(s).replace(/[^A-Za-z0-9._@+-]+/g, '_').replace(/^_+|_+$/g, '');   // keeps @ like the portal's own file names
 function fileFor(rows, name, fmt, sheet) {
   return fmt === 'xlsx' ? { name: name + '.xlsx', data: xlsxOf(rows, sheet), type: XLSX_MIME }
     : { name: name + '.csv', data: new Blob([csvOf(rows)], { type: 'text/csv;charset=utf-8' }), type: 'text/csv' };
@@ -403,11 +429,13 @@ function save(blob, name) {
 const asBlob = f => (f.data instanceof Blob ? f.data : new Blob([f.data], { type: f.type }));
 
 async function buildPortal() {
-  const p = PORTAL[job.report], ts = stamp(new Date()), files = [];
+  const p = PORTAL[job.report], ts = stamp(new Date()), files = [], used = new Set();
   for (const l of job.locs) {
     const s = job.state[l.id]; if (s.err || !s.rows.length) continue;
     const buf = job.report === 'cashflow' ? await cashflowBook(l, s) : await purchaseBook(l, s);
-    files.push({ name: 'Xola_' + p.file + '_' + safe(l.name) + '_' + ts + '.xlsx', data: buf, type: XLSX_MIME });
+    // named like the portal: Xola_transactions_<account e-mail>_<yyyy_mm_dd_hhmmss>.xlsx (account name when Xola gives no e-mail)
+    let who = safeFile((s.meta && s.meta.email) || l.name); if (used.has(who)) who += '_' + safe(l.name); used.add(who);
+    files.push({ name: 'Xola_' + p.file + '_' + who + '_' + ts + '.xlsx', data: buf, type: XLSX_MIME });
   }
   if (!files.length) return 0;
   if (files.length === 1) save(asBlob(files[0]), files[0].name);
@@ -441,6 +469,16 @@ async function finish() {
 $('go').onclick = () => start(false);
 $('retry').onclick = () => start(true);
 $('again').onclick = () => buildAndSave();
+
+/* ---------- troubleshooting (page address ending in ?debug=1) ---------- */
+$('probe').onclick = async () => {
+  const a = selected()[0]; if (!a) return showFatal('Tick an account first.');
+  $('probe').disabled = true; $('probeOut').classList.remove('hidden'); $('probeOut').value = 'Reading…';
+  try { const j = await api('probe', { seller: a.id }); $('probeOut').value = 'Account: ' + a.name + '\n\n' + j.text; $('probeCopy').classList.remove('hidden'); }
+  catch (e) { $('probeOut').value = 'Error: ' + e.message; }
+  $('probe').disabled = false;
+};
+$('probeCopy').onclick = () => { $('probeOut').select(); try { navigator.clipboard.writeText($('probeOut').value); } catch (e) { document.execCommand('copy'); } };
 
 init();
 </script>
